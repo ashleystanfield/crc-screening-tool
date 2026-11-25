@@ -1,0 +1,7 @@
+# The predictions file is published as a GitHub Release asset, not committed
+tool_grid.rds
+*.rds
+.Rhistory
+.RData
+.Rproj.user/
+rsconnect/
