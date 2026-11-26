@@ -3,11 +3,9 @@
 ## ▶ [Open the tool](#open-the-tool)
 
 <a id="open-the-tool"></a>
-**Link coming soon.** The online tool is being published; this link will go straight to it.
-
-A free online tool for health systems, public health programs and policymakers planning colorectal cancer screening.
-Choose your population, the share reached by each colonoscopy or FIT intervention, screening rates and prices, then see
-projected costs, cancers averted and life-years gained. Nothing to install: it runs in your web browser.
+A free online tool for health systems, public health programs and policymakers planning colorectal cancer screening intervention programs.
+When using the tool you can choose your population, the share reached by each colonoscopy or FIT intervention, screening rates and prices, then see
+projected costs, cancers averted and life-years gained.
 
 ---
 
