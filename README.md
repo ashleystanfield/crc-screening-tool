@@ -1,23 +1,30 @@
 # Metamodel-Based Colorectal Cancer Screening Decision Tool
 
-An R Shiny app. It reads pre-computed metamodel predictions (`tool_grid.rds`) and prices them in the browser.
+An R Shiny app for comparing colorectal cancer screening programs. It shows the predictions of the final random
+forest metamodels for every whole-number screening trajectory (before / during / after the intervention) and
+prices them with editable unit costs.
 
 ## How the predictions reach the app
 
-`tool_grid.rds` is not stored in this repository. It is attached to the newest GitHub Release, and the app downloads
-it from `releases/latest/download/tool_grid.rds` each time it starts. If a `tool_grid.rds` sits next to `app.R`, the
-app uses that copy instead (for local testing).
+The random forests were run ahead of time for every allowed whole-number trajectory (`make_tool_grid_1pt.R`, kept
+locally). The results are attached to the newest GitHub Release, not stored in this repository:
+
+- `grid_index.rds`: the trajectory list, quantity order and which part file holds each trajectory
+- `<program>_partN.bin`: float32 predictions, one block of 180 person types x 35 quantities per trajectory
+
+At start-up the app finds the newest release, downloads `grid_index.rds`, and then fetches only the ~25 KB block for
+the trajectory a user picks. If a folder `grid/` with these files sits next to `app.R`, the app reads it instead
+(local use).
 
 ## Updating to new metamodels
 
-1. Build the new grid with `make_tool_grid_v2.R` and check it with `test_tool_v2.R` (kept locally, not in this repo).
-2. On GitHub: Releases > Draft a new release > new tag (for example `grid-2027-01-15`) > attach the new
-   `tool_grid.rds` (same file name) > Publish release. Do not mark it as a pre-release.
-3. The online app uses the new file the next time it starts. To force that right away, restart the app in
-   Posit Connect Cloud.
+1. Run `make_tool_grid_1pt.R` with the new models (it checks itself at the end).
+2. Publish a new GitHub Release (for example tag `grid-2027-01-15`) with `grid_index.rds` and every `*_part*.bin`
+   file attached, all with the same names. Do not mark it as a pre-release.
+3. The online app uses the new release the next time it starts. Restart it in Posit Connect Cloud to switch at once.
 
-The new grid must have the same structure as the old one (same programs, inputs and outcomes). New inputs or outcomes
-need changes to `app.R`.
+The new predictions must have the same structure (same programs, inputs and outcomes). New inputs or outcomes need
+changes to `app.R`.
 
 ## Updating the app itself
 

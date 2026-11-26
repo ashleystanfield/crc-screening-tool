@@ -3,30 +3,60 @@
 # Set how much of the population is on each program (MCIC/MCIF/MFIC/MFIF), each program's screening before /
 # during / after the intervention, and the prices; see blended cost and health outcomes.
 #
-# v2 (2026-11-19): outcomes come from the final metamodels, pre-computed
-# for every allowed screening trajectory by make_tool_grid_v2.R into tool_grid.rds, so no model is loaded here.
+# Outcomes come from the final random forest metamodels, run ahead of time (make_tool_grid_1pt.R) for every
+# whole-number screening trajectory, so no model is loaded here.
 # Cost is computed as: predicted procedure counts x unit prices + predicted
 # cancer-care quantities x stage- and phase-specific prices. Every price can be changed in the Prices panel.
 # No intervention (program delivery) cost is included.
-# Run:   shiny::runApp()   from this folder (needs shiny)
+# Run:   shiny::runApp()   from this folder (needs shiny and curl)
 #
-# Predictions file: the app uses tool_grid.rds next to app.R if one is there (local testing). Otherwise it downloads
-# the newest one from the GitHub Release below each time the app starts, so uploading a new tool_grid.rds to a new
-# release updates the online tool with no change to this code.
+# Predictions: grid_index.rds (small) plus <combo>_partN.bin files (float32, one 180 x 35 block per trajectory).
+# If a folder "grid" with these files sits next to app.R, the app reads it (local use). Otherwise it uses the newest
+# GitHub Release of GRID_REPO: it downloads grid_index.rds at start-up and then fetches only the ~25 KB block for the
+# trajectory a user picks. Publishing a new release with new files updates the online tool with no code change.
 # =============================================================================
 library(shiny)
-GRID_URL <- Sys.getenv("CRC_GRID_URL",
-  "https://github.com/ashleystanfield/crc-screening-tool/releases/latest/download/tool_grid.rds")
-GRID_FILE <- local({
-  if (file.exists("tool_grid.rds")) return("tool_grid.rds")
-  dest <- file.path(tempdir(), "tool_grid.rds")
-  old <- options(timeout = 600); on.exit(options(old))
-  ok <- tryCatch(utils::download.file(GRID_URL, dest, mode = "wb", quiet = TRUE) == 0, error = function(e) FALSE)
-  if (!ok || !file.exists(dest)) stop("Could not download the predictions file from ", GRID_URL)
-  dest
+GRID_REPO <- "ashleystanfield/crc-screening-tool"
+GRID_SRC <- local({
+  if (file.exists(file.path("grid", "grid_index.rds"))) return(list(local = TRUE, base = "grid"))
+  h <- curl::new_handle(followlocation = FALSE, nobody = TRUE)
+  r <- curl::curl_fetch_memory(sprintf("https://github.com/%s/releases/latest", GRID_REPO), handle = h)
+  loc <- curl::parse_headers_list(r$headers)[["location"]]
+  if (is.null(loc) || !grepl("/releases/tag/", loc)) stop("Could not find the latest release of ", GRID_REPO)
+  tag <- sub(".*/releases/tag/", "", loc)
+  list(local = FALSE, base = sprintf("https://github.com/%s/releases/download/%s", GRID_REPO, tag), tag = tag)
 })
-GRID <- readRDS(GRID_FILE)
-if (!is.list(GRID) || !all(c("meta", "combos") %in% names(GRID))) stop("The predictions file is not a tool grid.")
+GRID <- local({
+  f <- file.path(GRID_SRC$base, "grid_index.rds")
+  if (!GRID_SRC$local) {
+    dest <- file.path(tempdir(), "grid_index.rds")
+    curl::curl_download(f, dest, handle = curl::new_handle(followlocation = TRUE)); f <- dest
+  }
+  readRDS(f)
+})
+if (!is.list(GRID) || !all(c("meta", "combos") %in% names(GRID))) stop("The predictions index is not a tool grid.")
+GRID_KEYS <- lapply(GRID$combos, function(g) paste(g$grid$before, g$grid$during, g$grid$after))
+# one trajectory's predictions (180 persons x quantities) from its part file
+read_row <- function(k, r) {
+  m <- GRID$meta; bpr <- m$bytes_per_row
+  part <- GRID$combos[[k]]$parts[(r - 1) %/% m$rows_per_part + 1]
+  off <- ((r - 1) %% m$rows_per_part) * bpr
+  raw_block <- if (GRID_SRC$local) {
+    con <- file(file.path(GRID_SRC$base, part), "rb"); on.exit(close(con)); seek(con, off); readBin(con, "raw", bpr)
+  } else {
+    url <- file.path(GRID_SRC$base, part); got <- NULL
+    for (try_n in 1:3) {
+      h <- curl::new_handle(followlocation = TRUE, range = sprintf("%.0f-%.0f", off, off + bpr - 1))
+      res <- tryCatch(curl::curl_fetch_memory(url, handle = h), error = function(e) NULL)
+      if (!is.null(res) && res$status_code == 206 && length(res$content) == bpr) { got <- res$content; break }
+      Sys.sleep(0.5)
+    }
+    if (is.null(got)) stop("Could not read predictions from ", url)
+    got
+  }
+  matrix(readBin(raw_block, "numeric", n = bpr / 4, size = 4, endian = "little"), m$n_person,
+         dimnames = list(NULL, m$quantities))
+}
 
 # ---- prices (default prices; 2026 dollars, not discounted) ---------------------
 DEFAULT_PRICES <- list(
@@ -95,10 +125,11 @@ ORDER <- names(PROGS); UNCOV <- "#9aa8ad"
 COLO_PRIMARY <- c(MCIC = TRUE, MCIF = TRUE, MFIC = FALSE, MFIF = FALSE)
 LIM <- function(C) if (COLO_PRIMARY[[C]]) list(bmax = 50, dmax = 80, unit = "10-year colonoscopy") else
                                           list(bmax = 40, dmax = 60, unit = "annual FIT")
-# snap to the 5-point grid and enforce before <= after <= during (the design constraint)
+# snap to the model grid (whole numbers) and enforce before <= after <= during (the design constraint)
+GRID_STEP <- GRID$meta$step
 snap <- function(C, b, d, a) {
-  L <- LIM(C); r5 <- function(v) 5 * round(v / 5)
-  b <- min(L$bmax, max(0, r5(b))); d <- min(L$dmax, max(b, r5(d))); a <- min(d, max(b, r5(a)))
+  L <- LIM(C); rs <- function(v) GRID_STEP * round(v / GRID_STEP)
+  b <- min(L$bmax, max(0, rs(b))); d <- min(L$dmax, max(b, rs(d))); a <- min(d, max(b, rs(a)))
   c(before = b, during = d, after = a)
 }
 .qcache <- new.env()
@@ -106,9 +137,10 @@ snap <- function(C, b, d, a) {
 lookup <- function(C, b, d, a) {
   s <- snap(C, b, d, a); key <- paste(C, s[1], s[2], s[3], sep = "|")
   if (!is.null(.qcache[[key]])) return(.qcache[[key]])
-  g <- GRID$combos[[tolower(C)]]
-  i <- which(g$grid$before == s[["before"]] & g$grid$during == s[["during"]] & g$grid$after == s[["after"]])
-  Q <- vapply(g$q, function(m) m[i, ], numeric(180))
+  k <- tolower(C)
+  i <- match(paste(s[["before"]], s[["during"]], s[["after"]]), GRID_KEYS[[k]])
+  if (is.na(i)) stop("Trajectory not in the prediction grid: ", key)
+  Q <- read_row(k, i)
   .qcache[[key]] <- Q; Q
 }
 # Eq. 4: per-person cost components from predicted quantities and prices
@@ -228,15 +260,15 @@ progPanel <- function(C) {
       span(class="cov", textOutput(paste0("cov_",C), inline=TRUE))),
     conditionalPanel(sprintf("input.en_%s", C),
       tags$div(class="elig-label", sprintf("Screening trajectory (%s %%)", L$unit)),
-      sliderInput(paste0("before_",C), "Before intervention — baseline (%)", 0, L$bmax, def$before, step=5),
+      sliderInput(paste0("before_",C), "Before intervention — baseline (%)", 0, L$bmax, def$before, step=1),
       radioButtons(paste0("dmode_",C), "During intervention",
                    c("Moderate (+10 pts)"="mod","Intensive (+20 pts)"="int","Exact %"="exact"), def$dmode, inline=TRUE),
       conditionalPanel(sprintf("input.dmode_%s == 'exact'", C),
-                   sliderInput(paste0("dval_",C), "During screening (%)", 0, L$dmax, def$dval, step=5)),
+                   sliderInput(paste0("dval_",C), "During screening (%)", 0, L$dmax, def$dval, step=1)),
       radioButtons(paste0("amode_",C), "After intervention",
                    c("Same as before"="same","Specify %"="spec"), def$amode, inline=TRUE),
       conditionalPanel(sprintf("input.amode_%s == 'spec'", C),
-                   sliderInput(paste0("aval_",C), "After screening (%) — kept between before and during", 0, L$dmax, def$aval, step=5)),
+                   sliderInput(paste0("aval_",C), "After screening (%) — kept between before and during", 0, L$dmax, def$aval, step=1)),
       tags$div(class="elig-label", "Who is on this program (population mix)"),
       popMixUI(C)))
 }
