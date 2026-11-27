@@ -1,8 +1,14 @@
 # Colorectal Cancer Screening Decision Tool
 
-## ▶ [Open the tool](#open-the-tool)
+## ▶ [Open the tool](https://01a21d74-bbe6-66cc-9c1c-9f9cf9253328.share.connect.posit.cloud/)
 
-<a id="open-the-tool"></a>
+**https://01a21d74-bbe6-66cc-9c1c-9f9cf9253328.share.connect.posit.cloud/**
+
+<img src="qr_code.png" alt="QR code that opens the tool" width="160">
+
+Scan the QR code with a phone camera, or click the link. If nobody has used the tool for a while, it can take up to
+a minute to wake up.
+
 A free online tool for health systems, public health programs and policymakers planning colorectal cancer screening intervention programs.
 When using the tool you can choose your population, the share reached by each colonoscopy or FIT intervention, screening rates and prices, then see
 projected costs, cancers averted and life-years gained.
